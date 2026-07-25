@@ -516,10 +516,26 @@ are **independent** of the 380k context setting and of each other.
 
 - **`HF_OVERRIDES='{"num_experts_per_tok":4,...}'`** (the `num_experts_per_tok=4`
   part) — runs **4 active experts per token instead of the model default 8**.
-  Roughly halves active compute. Quality impact is usually modest on general
-  text but can degrade harder coding/reasoning. (The `index_topk_freq=8` in that
-  override is a separate, validated recipe value for the `:latest` build — keep
-  it either way; it is not the quality knob.)
+  Halves expert-FFN compute. **Measured gain on this ring: ~8.5 → ~10.0 tok/s
+  (+18%)** — not the ~2× the compute math suggests, because this deployment is
+  memory-bandwidth-bound (attention, KV reads, the all-reduce, and fixed
+  per-step overhead are unchanged). The quality cost is real; see the table
+  below. (The `index_topk_freq=8` in that override is a separate, validated
+  recipe value for the `:latest` build — keep it either way; it is not the
+  quality knob.)
+
+  Expected quality impact on GLM-5.2 (tracks the curve on other modern large
+  MoEs that default to top-8, notably the Qwen3 family):
+
+  | Active experts (top-k) | Expected quality vs full GLM-5.2 |
+  | --- | --- |
+  | 8 (default, recommended) | full strength |
+  | 6–7 | mild drop, still very strong |
+  | 4 | noticeable-to-significant drop — especially on hard coding, multi-step agent work, long-horizon reasoning |
+  | ≤3 | sharp degradation |
+
+  Keep 8 for quality-sensitive work. 4 is defensible for high-throughput chat
+  where some loss is acceptable.
 - **`ENABLE_MTP=1` + `MTP_SPEC_TOKENS=3`** — Multi-Token Prediction speculative
   decoding. On this NVFP4/AQLM-quantized MoE we **measured MTP ~35% slower**
   than off (draft rejection costs more than it saves for diverse prompts). It

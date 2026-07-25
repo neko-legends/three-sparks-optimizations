@@ -46,7 +46,31 @@ intended 380k-token context.
 | --- | --- | --- |
 | MiaAI-Lab stock (PIECEWISE graphs, no fusion) | ~7.1 tok/s | hangs unless this repo's NCCL patch is applied |
 | + FULL CUDA graphs + all-reduce/RMS-norm fusion | ~7.8 tok/s | quality-neutral: same math, scheduled differently |
-| **+ MTP off (recommended recipe)** | **~8.5 tok/s** | MTP measured slower on this quantized MoE |
+| **+ MTP off (recommended, 8 experts)** | **~8.5 tok/s** | full model quality; MTP measured slower on this quantized MoE |
+| + drop to 4 experts (`num_experts_per_tok=4`) | ~10.0 tok/s | **+18%, not 2×** — see the quality trade below |
+
+### The 4-expert trade, measured honestly
+
+Halving active experts (8→4) sounds like it should roughly double speed, since
+it halves expert-FFN compute. **It doesn't — this deployment is
+memory-bandwidth-bound, not compute-bound**, so attention, KV-cache reads, the
+TP all-reduce, and fixed per-step overhead are unchanged. The real measured gain
+is **~18% (8.5 → 10.0 tok/s)**, useful but not transformative.
+
+The cost is quality. Expected impact on GLM-5.2 tracks the curve seen on other
+modern large MoEs that default to top-8 (notably the Qwen3 family):
+
+| Active experts (top-k) | Expected quality vs full GLM-5.2 |
+| --- | --- |
+| 8 (default, recommended) | full strength |
+| 6–7 | mild drop, still very strong |
+| 4 | noticeable-to-significant drop — especially on hard coding, multi-step agent work, and long-horizon reasoning |
+| ≤3 | sharp degradation |
+
+**Recommendation:** keep 8 experts for quality-sensitive work (coding, agents,
+reasoning). 4 experts is a defensible choice for high-throughput chat where some
+quality loss is acceptable — but go in with eyes open about the trade, and do
+not expect the 2× speedup the compute math suggests.
 
 Single-stream tok/s is the latency metric. **Aggregate throughput under
 concurrent load is much higher** — batched decode shares the fixed per-token
