@@ -72,10 +72,42 @@ reasoning). 4 experts is a defensible choice for high-throughput chat where some
 quality loss is acceptable — but go in with eyes open about the trade, and do
 not expect the 2× speedup the compute math suggests.
 
-Single-stream tok/s is the latency metric. **Aggregate throughput under
-concurrent load is much higher** — batched decode shares the fixed per-token
-overhead across requests, so real multi-request workloads see far more than
-8.5 tok/s.
+Single-stream tok/s is the latency metric (one user, one request). **Aggregate
+throughput under concurrent load is higher**, because batched decode shares the
+fixed per-token overhead across requests — but only if `MAX_NUM_SEQS` is raised
+above 1 (the default caps you at single-stream no matter how many requests you
+fire; they just queue). Measured at 8 experts, MTP off, FULL graphs:
+
+| Concurrent requests | Aggregate tok/s | Per-request tok/s |
+| --- | --- | --- |
+| 1 (`MAX_NUM_SEQS=1`) | ~8.2 | 8.2 |
+| 2 (`MAX_NUM_SEQS=4`) | ~11.6 | 5.8 |
+| 4 (`MAX_NUM_SEQS=4`) | ~14.8 | 3.7 |
+
+Aggregate climbs with concurrency, but **per-request latency degrades** as it
+does — the classic throughput/latency tradeoff. Even pushing hard, aggregate
+lands in the low-to-mid tens of tok/s, not hundreds.
+
+### Honest bottom line: is this fast enough?
+
+**For interactive single-user use: marginal.** ~8 tok/s means a 200-token reply
+takes ~25 seconds to stream. That is usable for patient, batch, or background
+work, but sluggish for a chat-like experience. The hard ceiling is the GB10's
+273 GB/s memory bandwidth against an 8B-active-param MoE — software tuning
+moves the needle ~10–20%, not 5×. Dropping to 4 experts buys ~18% more at a real
+quality cost; MTP spec-decode made it *slower* on this quantized model.
+
+**For multi-user aggregate throughput: better but still modest.** Batching
+raises aggregate toward ~15 tok/s at 4-way concurrency, at the cost of each
+user's latency.
+
+If your goal is fast interactive inference, **a 3-Spark ring is the wrong shape
+for this model** — tensor-parallel across three 273 GB/s nodes is
+bandwidth-starved for an 8B-active MoE. The same model on a single Spark (no
+inter-node all-reduce) or a denser/smaller model would be dramatically faster
+per token. This repository is for when you specifically need GLM-5.2's full
+quality and 380k context across the hardware you have, and can tolerate the
+latency — not for when you need speed.
 
 ## What's in here
 
